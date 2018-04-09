@@ -25,15 +25,18 @@ def get_cfg_file(configfile):
                 if f_line != [""]:
                     config[f_line[0]] = f_line[1]
 
+
 class UserData(Process):
     """
     用户类，读取用户信息
     userdatafile : 用户数据存储文件
     """
     def __init__(self,userdatafile):
+        super().__init__()
         self.usr_file = userdatafile
-        
-    def run(self):
+    
+    #解析数据    
+    def __parse(self):
         with open(self.usr_file) as file:
             for line in file:
                 # 去掉空格
@@ -44,10 +47,13 @@ class UserData(Process):
                 # 去掉空行
                 if f_line != [""]:
                     # 通过yield关键字，实现生成器，逐行返回并处理数据
-                    yield queue1.put(f_line)
-                    # 将用户数据存储到userdata字典里
-                    # userdata[f_line[0]] = f_line[1]
-        queue1.put(None)
+                    yield f_line
+        #发送完成信号
+        yield None    
+
+    def run(self):
+        for item in self.__parse():
+            queue1.put(item)
 
 
 class CalSolution(Process):
@@ -57,6 +63,7 @@ class CalSolution(Process):
     计算社保金额，个税金额，税后工资
     """
     def __init__(self):
+        super().__init__()
 	# 读取社保比例信息
         try:
             self.low = float(config['JiShuL'])
@@ -78,17 +85,17 @@ class CalSolution(Process):
             if u_data is None:break    # 收到结束信号则结束循环读取
             # 计算五险一金的基数
             try:
-                u_data[2] = float(u_data[2])
+                u_data[1] = float(u_data[1])
             except TypeError:
                 print("type error2")
-            if u_data[2] < self.low:
+            if u_data[1] < self.low:
                 j_shu = self.low
-            elif u_data[2] > self.high:
+            elif u_data[1] > self.high:
                 j_shu = self.high
             else:
-                j_shu = u_data[2] 
+                j_shu = u_data[1] 
             sb = j_shu * self.x_sb
-            t = u_data[2] - sb - 3500
+            t = u_data[1] - sb - 3500
             if t < 0: tax = 0
             elif t<=1500: tax = t * 0.03
             elif t<=4500: tax = t * 0.1 - 105
@@ -105,11 +112,11 @@ class CalSolution(Process):
             # 税收金额
             tax_d = format(tax,'.2f')
             # 税后工资
-            mon = u_data[2] - tax - sb
+            mon = u_data[1] - tax - sb
             shgz_d = format(mon,'.2f')
             # 税前工资
-            sqgz_d = format(u_data[2],'.0f') 
-            info_list=[u_data[1],sqgz_d,sb_d,tax_d,shgz_d]
+            sqgz_d = format(u_data[1],'.0f') 
+            info_list=[u_data[0],sqgz_d,sb_d,tax_d,shgz_d]
             # 将数据发送到队列
             queue2.put(info_list)
         # 数据计算完毕，发送完成信号
@@ -121,20 +128,23 @@ class DumpFile(Process):
     outputfile:指定写入结果的文件名
     '''
     def __init__(self,outputfile):
+        super().__init__()
         self.outputfile=outputfile
 
     def run(self):
+        # 清空之前文件中的内容
+        with open(self.outputfile,'w') as file_hb:
+            file_hb.write("")
         while True:
             w_list = queue2.get()
             if w_list is None:break     #收到结束信号则结束
             #存储格式：工号，税前工资，社保金额，个税金额，税后工资
-            with open(self.outputfile,'w') as file:
+            with open(self.outputfile,'a') as file:
                 for item in w_list:
-                    for i in item:
-                        file.write(i)
-                        if item.index(i)<len(item)-1:
-                            file.write(",")
-                    file.write("\n")
+                    file.write(item)
+                    if w_list.index(item)<len(w_list)-1:
+                        file.write(",")
+                file.write("\n")
         	
 
 
