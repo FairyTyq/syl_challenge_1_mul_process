@@ -5,10 +5,10 @@ import sys
 
 from multiprocessing import Process,Queue
 
+queue1 = Queue()
 queue2 = Queue()
-queue3 = Queue()
 
-config = {} #存储社保比例配置信息
+config = {} # 存储社保比例配置信息
 
 # 获取配置文件的内容
 def get_cfg_file(configfile):
@@ -26,14 +26,14 @@ def get_cfg_file(configfile):
                     config[f_line[0]] = f_line[1]
 
 class UserData(Process):
-    """用户类，计算工资并写入指定文件"""
+    """
+    用户类，读取用户信息
+    userdatafile : 用户数据存储文件
+    """
     def __init__(self,userdatafile):
         self.usr_file = userdatafile
         
-    #计算税后工资 
     def run(self):
-        #userdata = {}  ＃用来存储用户数据
- 
         with open(self.usr_file) as file:
             for line in file:
                 # 去掉空格
@@ -43,22 +43,21 @@ class UserData(Process):
                 f_line = s_line.split(",",1) 
                 # 去掉空行
                 if f_line != [""]:
-                    #通过yield关键字，实现生成器，逐行返回并处理数据
+                    # 通过yield关键字，实现生成器，逐行返回并处理数据
                     yield queue1.put(f_line)
-                    #将用户数据存储到userdata字典里
-                    #userdata[f_line[0]] = f_line[1]
-        queue1.task_done()
+                    # 将用户数据存储到userdata字典里
+                    # userdata[f_line[0]] = f_line[1]
+        queue1.put(None)
 
 
 class CalSolution(Process):
-        """
-        进程二
-        计算类
-        计算社保金额，个税金额，税后工资
-        
-        """
+    """
+    进程二
+    计算类
+    计算社保金额，个税金额，税后工资
+    """
     def __init__(self):
-	#读取社保比例信息
+	# 读取社保比例信息
         try:
             self.low = float(config['JiShuL'])
             self.high = float(config['JiShuH'])
@@ -74,58 +73,68 @@ class CalSolution(Process):
             print("type error")        
 
     def run(self):
-        u_data = queue1.get()
-        #计算五险一金的基数
-        try:
-            u_data[2] = float(u_data[2])
-        except TypeError:
-            print("type error2")
-        if u_data[2] < self.low:
-            j_shu = self.low
-        elif u_data[2] > self.high:
-            j_shu = self.high
-        else:
-            j_shu = u_data[2] 
-        sb = j_shu * self.x_sb
-        t = u_data[2] - sb - 3500
-        if t < 0: tax = 0
-        elif t<=1500: tax = t * 0.03
-        elif t<=4500: tax = t * 0.1 - 105
-        elif t<=9000: tax = t * 0.2 - 555
-        elif t<=35000: tax = t * 0.25 - 1005
-        elif t<=55000: tax = t * 0.3 - 2755
-        elif t<=80000: tax = t * 0.35 - 5505
-        else: tax = t * 0.45 -13505
-        # 将数据修改为2位小数的数字形式字符串
-        
-        #社保金额
-        sb_d = format(sb,'.2f')
-        #税收金额
-        tax_d = format(tax,'.2f')
-        #税后工资
-        mon = u_data[2] - tax - sb
-        shgz_d = format(mon,'.2f')
-        #税前工资
-        sqgz_d = format(u_data[2],'.0f') 
-        info_list=[u_data[1],sqgz_d,sb_d,tax_d,shgz_d]
-        queue2.put(info_list)
-
+        while True:
+            u_data = queue1.get()
+            if u_data is None:break    # 收到结束信号则结束循环读取
+            # 计算五险一金的基数
+            try:
+                u_data[2] = float(u_data[2])
+            except TypeError:
+                print("type error2")
+            if u_data[2] < self.low:
+                j_shu = self.low
+            elif u_data[2] > self.high:
+                j_shu = self.high
+            else:
+                j_shu = u_data[2] 
+            sb = j_shu * self.x_sb
+            t = u_data[2] - sb - 3500
+            if t < 0: tax = 0
+            elif t<=1500: tax = t * 0.03
+            elif t<=4500: tax = t * 0.1 - 105
+            elif t<=9000: tax = t * 0.2 - 555
+            elif t<=35000: tax = t * 0.25 - 1005
+            elif t<=55000: tax = t * 0.3 - 2755
+            elif t<=80000: tax = t * 0.35 - 5505
+            else: tax = t * 0.45 -13505
+            
+            # 将数据修改为2位小数的数字形式字符串
+            
+            # 社保金额
+            sb_d = format(sb,'.2f')
+            # 税收金额
+            tax_d = format(tax,'.2f')
+            # 税后工资
+            mon = u_data[2] - tax - sb
+            shgz_d = format(mon,'.2f')
+            # 税前工资
+            sqgz_d = format(u_data[2],'.0f') 
+            info_list=[u_data[1],sqgz_d,sb_d,tax_d,shgz_d]
+            # 将数据发送到队列
+            queue2.put(info_list)
+        # 数据计算完毕，发送完成信号
+        queue2.put(None)
                 
 class DumpFile(Process):
-    #将计算结果写入指定文件
+    '''
+    将计算结果写入指定文件 
+    outputfile:指定写入结果的文件名
+    '''
     def __init__(self,outputfile):
         self.outputfile=outputfile
 
     def run(self):
-        w_list = queue2.get()            
-        #存储格式：工号，税前工资，社保金额，个税金额，税后工资
-        with open(self.outputfile,'w') as file:
-            for item in w_list:
-                for i in item:
-                    file.write(i)
-                    if item.index(i)<len(item)-1:
-                        file.write(",")
-                file.write("\n")
+        while True:
+            w_list = queue2.get()
+            if w_list is None:break     #收到结束信号则结束
+            #存储格式：工号，税前工资，社保金额，个税金额，税后工资
+            with open(self.outputfile,'w') as file:
+                for item in w_list:
+                    for i in item:
+                        file.write(i)
+                        if item.index(i)<len(item)-1:
+                            file.write(",")
+                    file.write("\n")
         	
 
 
@@ -147,7 +156,7 @@ def main():
     
     p1 = UserData(usr_file)
     p2 = CalSolution()
-    p3 = DumFile(gz_file)
+    p3 = DumpFile(gz_file)
 
     p1.start()
     p1.join()
